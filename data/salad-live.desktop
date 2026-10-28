@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Salad Live
+GenericName=Живые обои
+Comment=Живые обои: лес, водопад и домик под дождём — настройки
+Exec=@BIN@ --settings
+Icon=salad-live
+Categories=Settings;DesktopSettings;GTK;
+Keywords=wallpaper;live;обои;живые;дождь;
+StartupNotify=false

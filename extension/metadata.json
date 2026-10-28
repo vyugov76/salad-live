@@ -1,0 +1,8 @@
+{
+  "uuid": "salad-live@vyugov76.github.io",
+  "name": "Salad Live helper",
+  "description": "Сообщает живым обоям Salad Live, виден ли рабочий стол: когда он закрыт окнами или открыт обзор, обои встают на паузу и не тратят ресурсы.",
+  "shell-version": ["45", "46", "47", "48", "49", "50"],
+  "url": "https://github.com/vyugov76/salad-live",
+  "version": 1
+}

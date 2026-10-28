@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Salad Live
+Comment=Живые обои: лес, водопад и домик под дождём
+Exec=sh -c "sleep 3; exec @BIN@"
+Icon=salad-live
+OnlyShowIn=GNOME;Unity;
+X-GNOME-Autostart-enabled=true
+NoDisplay=true
