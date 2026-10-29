@@ -17,7 +17,7 @@
 (об этом сообщает расширение GNOME Shell из комплекта), когда экран заблокирован
 или погашен; от батареи частота кадров снижается до battery_fps.
 """
-__version__ = '1.0.0'
+__version__ = '1.0.1'
 import json
 import os
 import signal
@@ -28,6 +28,8 @@ os.environ['GST_GL_WINDOW'] = 'x11'  # иначе GstGL берёт Wayland и п
 os.environ.setdefault('GST_GL_PLATFORM', 'egl')
 
 import gi  # noqa: E402
+from gi.repository import GLib  # noqa: E402
+GLib.set_prgname('salad-live')  # WM_CLASS: по нему расширение находит окно обоев (до импорта Gtk!)
 gi.require_version('Gtk', '3.0')
 gi.require_version('Gdk', '3.0')
 gi.require_version('GdkX11', '3.0')
@@ -150,6 +152,8 @@ class Wallpaper:
         self.win.add(self.area)
         self.win.connect('realize', lambda w: w.get_window().input_shape_combine_region(cairo.Region(), 0, 0))
         self.win.show_all()
+        # под окно значков рабочего стола; дальше это держит расширение GNOME Shell
+        self.win.get_window().lower()
 
         frag = open(os.path.join(HERE, 'scene.frag')).read()
         self.frag = frag.replace('//@CONSTS@', open(os.path.join(HERE, 'consts.glsl')).read())

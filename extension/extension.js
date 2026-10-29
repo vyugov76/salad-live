@@ -7,6 +7,10 @@
 //
 // Рабочий стол считается закрытым, если открыт обзор или на каждом мониторе
 // обычные окна закрывают не меньше COVER_LIMIT рабочей области.
+//
+// Ещё расширение держит окно обоев под окном значков рабочего стола (DING):
+// оба лежат в слое «рабочий стол», а DING при каждом открытии/закрытии окна
+// опускает себя на самое дно — то есть под обои, и значки пропадают.
 
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
@@ -27,7 +31,10 @@ export default class SaladLiveHelper extends Extension {
         this._timeoutId = 0;
 
         const q = () => this._queue();
-        this._connect(global.display, 'restacked', q);
+        this._connect(global.display, 'restacked', () => {
+            this._keepWallpaperAtBottom();
+            q();
+        });
         this._connect(global.display, 'window-created', (_d, w) => {
             this._track(w);
             q();
@@ -38,6 +45,7 @@ export default class SaladLiveHelper extends Extension {
         this._connect(Main.layoutManager, 'monitors-changed', q);
         for (const actor of global.get_window_actors())
             this._track(actor.meta_window);
+        this._keepWallpaperAtBottom();
 
         // обои (пере)запустились — отправляем им текущее состояние заново
         this._watchId = Gio.bus_watch_name(Gio.BusType.SESSION, BUS_NAME, Gio.BusNameWatcherFlags.NONE,
@@ -61,6 +69,27 @@ export default class SaladLiveHelper extends Extension {
         // без расширения обои должны просто работать
         this._send(true);
         this._visible = null;
+    }
+
+    _isWallpaper(win) {
+        return win.get_window_type() === Meta.WindowType.DESKTOP &&
+            (win.get_wm_class() === 'salad-live' || win.get_title() === 'salad-live');
+    }
+
+    // окна обоев — ниже всех остальных окон слоя «рабочий стол» (значков DING)
+    _keepWallpaperAtBottom() {
+        const stack = global.get_window_actors().map(a => a.meta_window); // снизу вверх
+        let otherSeen = false;
+        for (const win of stack) {
+            if (!win || win.get_window_type() !== Meta.WindowType.DESKTOP)
+                continue;
+            if (this._isWallpaper(win)) {
+                if (otherSeen)
+                    win.lower(); // вызовет ещё один restacked — там уже всё на месте
+            } else {
+                otherSeen = true;
+            }
+        }
     }
 
     _connect(obj, signal, cb) {
@@ -137,6 +166,7 @@ export default class SaladLiveHelper extends Extension {
             !w.minimized &&
             w.showing_on_its_workspace() &&
             !w.skip_taskbar &&
+            !this._isWallpaper(w) &&
             w.get_window_type() === Meta.WindowType.NORMAL);
         const n = global.display.get_n_monitors();
         for (let m = 0; m < n; m++) {
