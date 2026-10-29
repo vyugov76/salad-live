@@ -96,9 +96,20 @@ export default class SaladLiveHelper extends Extension {
             if (actor.opacity !== 0)
                 actor.opacity = 0;
         });
+        // мышь — сквозь окно обоев к значкам рабочего стола (клик, ПКМ, перетаскивание):
+        // оболочка выбирает окно под курсором по реактивным акторам, поэтому снимаем
+        // реактивность со всего дерева окна, включая поверхности, созданные позже
+        this._setReactive(actor, false);
+        const childId = actor.connect('child-added', (_a, child) => this._setReactive(child, false));
         const destroyId = actor.connect('destroy', () => this._release(actor, true));
-        this._clones.set(actor, {clone, opacityId, destroyId});
+        this._clones.set(actor, {clone, opacityId, childId, destroyId});
         console.log(`[salad-live] обои перенесены в слой фона (${actor.width}x${actor.height})`);
+    }
+
+    _setReactive(actor, reactive) {
+        actor.reactive = reactive;
+        for (const child of actor.get_children())
+            this._setReactive(child, reactive);
     }
 
     _release(actor, destroyed = false) {
@@ -108,8 +119,10 @@ export default class SaladLiveHelper extends Extension {
         this._clones.delete(actor);
         if (!destroyed) {
             actor.disconnect(c.opacityId);
+            actor.disconnect(c.childId);
             actor.disconnect(c.destroyId);
             actor.opacity = 255;
+            this._setReactive(actor, true);
         }
         c.clone.destroy();
     }
