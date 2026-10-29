@@ -8,12 +8,14 @@
 // Рабочий стол считается закрытым, если открыт обзор или на каждом мониторе
 // обычные окна закрывают не меньше COVER_LIMIT рабочей области.
 //
-// Ещё расширение держит окно обоев под окном значков рабочего стола (DING):
-// оба лежат в слое «рабочий стол», а DING при каждом открытии/закрытии окна
-// опускает себя на самое дно — то есть под обои, и значки пропадают.
+// Ещё расширение переносит картинку обоев в слой фона GNOME (под всеми окнами,
+// включая значки рабочего стола DING): само окно обоев делается прозрачным,
+// а в фон кладётся его живая копия (Clutter.Clone). Так значки и файлы на рабочем
+// столе всегда видны поверх обоев, как бы ни менялся порядок окон.
 
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import Clutter from 'gi://Clutter';
 import Meta from 'gi://Meta';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
@@ -29,23 +31,24 @@ export default class SaladLiveHelper extends Extension {
         this._windows = new Map();
         this._visible = null;
         this._timeoutId = 0;
+        this._clones = new Map(); // MetaWindowActor обоев → {clone, opacityId}
 
         const q = () => this._queue();
-        this._connect(global.display, 'restacked', () => {
-            this._keepWallpaperAtBottom();
-            q();
-        });
+        this._connect(global.display, 'restacked', q);
         this._connect(global.display, 'window-created', (_d, w) => {
             this._track(w);
             q();
         });
+        // актор окна появляется к моменту map — тогда и переносим обои в фон
+        this._connect(global.window_manager, 'map', (_wm, actor) => this._adopt(actor));
         this._connect(global.workspace_manager, 'active-workspace-changed', q);
         this._connect(Main.overview, 'showing', q);
         this._connect(Main.overview, 'hidden', q);
         this._connect(Main.layoutManager, 'monitors-changed', q);
-        for (const actor of global.get_window_actors())
+        for (const actor of global.get_window_actors()) {
             this._track(actor.meta_window);
-        this._keepWallpaperAtBottom();
+            this._adopt(actor);
+        }
 
         // обои (пере)запустились — отправляем им текущее состояние заново
         this._watchId = Gio.bus_watch_name(Gio.BusType.SESSION, BUS_NAME, Gio.BusNameWatcherFlags.NONE,
@@ -66,30 +69,49 @@ export default class SaladLiveHelper extends Extension {
         this._signals = [];
         for (const w of [...this._windows.keys()])
             this._untrack(w);
+        for (const actor of [...this._clones.keys()])
+            this._release(actor);
         // без расширения обои должны просто работать
         this._send(true);
         this._visible = null;
     }
 
     _isWallpaper(win) {
-        return win.get_window_type() === Meta.WindowType.DESKTOP &&
-            (win.get_wm_class() === 'salad-live' || win.get_title() === 'salad-live');
+        return !!win && win.get_window_type() === Meta.WindowType.DESKTOP &&
+            (win.get_wm_class_instance() === 'salad-live' || win.get_title() === 'salad-live');
     }
 
-    // окна обоев — ниже всех остальных окон слоя «рабочий стол» (значков DING)
-    _keepWallpaperAtBottom() {
-        const stack = global.get_window_actors().map(a => a.meta_window); // снизу вверх
-        let otherSeen = false;
-        for (const win of stack) {
-            if (!win || win.get_window_type() !== Meta.WindowType.DESKTOP)
-                continue;
-            if (this._isWallpaper(win)) {
-                if (otherSeen)
-                    win.lower(); // вызовет ещё один restacked — там уже всё на месте
-            } else {
-                otherSeen = true;
-            }
+    // окно обоев → прозрачное, а его живая копия — в слой фона, под всеми окнами
+    _adopt(actor) {
+        if (!actor || this._clones.has(actor) || !this._isWallpaper(actor.meta_window))
+            return;
+        const clone = new Clutter.Clone({source: actor, reactive: false});
+        clone.add_constraint(new Clutter.BindConstraint({source: actor, coordinate: Clutter.BindCoordinate.ALL}));
+        const bg = Main.layoutManager._backgroundGroup;
+        bg.add_child(clone);
+        bg.set_child_above_sibling(clone, null); // над картинкой фона, но всё ещё под окнами
+        actor.opacity = 0;
+        // Clone рисует источник со своей прозрачностью, так что копия видна
+        const opacityId = actor.connect('notify::opacity', () => {
+            if (actor.opacity !== 0)
+                actor.opacity = 0;
+        });
+        const destroyId = actor.connect('destroy', () => this._release(actor, true));
+        this._clones.set(actor, {clone, opacityId, destroyId});
+        console.log(`[salad-live] обои перенесены в слой фона (${actor.width}x${actor.height})`);
+    }
+
+    _release(actor, destroyed = false) {
+        const c = this._clones.get(actor);
+        if (!c)
+            return;
+        this._clones.delete(actor);
+        if (!destroyed) {
+            actor.disconnect(c.opacityId);
+            actor.disconnect(c.destroyId);
+            actor.opacity = 255;
         }
+        c.clone.destroy();
     }
 
     _connect(obj, signal, cb) {
